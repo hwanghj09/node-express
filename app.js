@@ -1,46 +1,55 @@
-var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
-const nunjucks = require('nunjucks');
+const express = require('express');
+const http = require('http');
+const socketIO = require('socket.io');
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
 
-var indexRouter = require('./routes/index');
-// var usersRouter = require('./routes/users');
+const adapter = new FileSync('db.json');
+const db = low(adapter);
 
-var app = express();
+const app = express();
+const server = http.createServer(app);
+const io = socketIO(server);
 
-// view engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'njk');
-nunjucks.configure('views', { 
-  express: app,
-  watch: true,
+app.use(express.static('views'));
+
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/index.html');
 });
 
-app.use(logger('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
+// Initialize database if it doesn't exist
+db.defaults({ messages: [] }).write();
+const users = {}; // Store user nicknames
 
-app.use('/', indexRouter);
-// app.use('/users', usersRouter);
+io.on('connection', (socket) => {
+    console.log('a user connected');
 
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
-  next(createError(404));
+    // Event handler for setting nickname
+    socket.on('set nickname', (nickname) => {
+        users[socket.id] = nickname;
+        socket.broadcast.emit('chat message', { text: `${nickname} has joined the chat.`, nickname: 'System' });
+    });
+
+    // Send previous messages to the new client
+    socket.emit('previous messages', db.get('messages').value());
+
+    socket.on('disconnect', () => {
+        const nickname = users[socket.id];
+        if (nickname) {
+            io.emit('chat message', { text: `${nickname} has left the chat.`, nickname: 'System' });
+        }
+        delete users[socket.id];
+        console.log('user disconnected');
+    });
+
+    socket.on('chat message', (msg) => {
+        const nickname = users[socket.id] || 'Anonymous';
+        const newMessage = { text: msg.text, nickname: nickname, timestamp: new Date() };
+        db.get('messages').push(newMessage).write();
+        io.emit('chat message', newMessage);
+    });
 });
 
-// error handler
-app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
-
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
+server.listen(3000, () => {
+    console.log('listening on *:3000');
 });
-
-module.exports = app;
