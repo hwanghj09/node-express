@@ -1,55 +1,51 @@
 const express = require('express');
-const http = require('http');
-const socketIO = require('socket.io');
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
-
-const adapter = new FileSync('db.json');
-const db = low(adapter);
+const os = require('os');
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIO(server);
+const port = 3000;
 
-app.use(express.static('views'));
+app.set('view engine', 'ejs');
 
 app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/index.html');
+    const internalIP = getInternalIP();
+    const externalIP = getExternalIP();
+    const publicIP = getPublicIP();
+
+    res.render('index', { internalIP, externalIP, publicIP });
 });
 
-// Initialize database if it doesn't exist
-db.defaults({ messages: [] }).write();
-const users = {}; // Store user nicknames
-
-io.on('connection', (socket) => {
-    console.log('a user connected');
-
-    // Event handler for setting nickname
-    socket.on('set nickname', (nickname) => {
-        users[socket.id] = nickname;
-        socket.broadcast.emit('chat message', { text: `${nickname} has joined the chat.`, nickname: 'System' });
-    });
-
-    // Send previous messages to the new client
-    socket.emit('previous messages', db.get('messages').value());
-
-    socket.on('disconnect', () => {
-        const nickname = users[socket.id];
-        if (nickname) {
-            io.emit('chat message', { text: `${nickname} has left the chat.`, nickname: 'System' });
+function getInternalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const interfaceName in interfaces) {
+        const interfaceInfo = interfaces[interfaceName];
+        for (const info of interfaceInfo) {
+            if (info.family === 'IPv4' && !info.internal) {
+                return info.address;
+            }
         }
-        delete users[socket.id];
-        console.log('user disconnected');
-    });
+    }
+    return 'Internal IP not found';
+}
 
-    socket.on('chat message', (msg) => {
-        const nickname = users[socket.id] || 'Anonymous';
-        const newMessage = { text: msg.text, nickname: nickname, timestamp: new Date() };
-        db.get('messages').push(newMessage).write();
-        io.emit('chat message', newMessage);
-    });
-});
+function getExternalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const interfaceName in interfaces) {
+        const interfaceInfo = interfaces[interfaceName];
+        for (const info of interfaceInfo) {
+            if (info.family === 'IPv4' && info.internal) {
+                return info.address;
+            }
+        }
+    }
+    return 'External IP not found';
+}
 
-server.listen(3000, () => {
-    console.log('listening on *:3000');
+function getPublicIP() {
+    // 여기에 공인 아이피를 확인하는 코드를 추가할 수 있습니다.
+    // 실제로는 외부 서비스를 이용하거나 다른 방법을 사용해야 합니다.
+    return 'Public IP not found';
+}
+
+app.listen(port, () => {
+    console.log(`Server is running at http://localhost:${port}`);
 });
